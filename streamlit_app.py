@@ -4,24 +4,26 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import scipy.cluster.hierarchy as cluster_hierarchy
 import scipy.spatial
 import streamlit as st
+from matplotlib import pyplot as plt
 
 
 # streamlit run streamlit_app.py
 
 
 def main():
-    df_topics, df_frequencies, df_article_topic = get_data()
+    df_topics, df_frequencies, df_article_topic, figure_topics_structure = get_data()
 
-    tabs = ['Topics', 'Similarity search', 'Article points']
+    tabs = ['Topics', 'Similarity search', 'Article points', 'Topics structure']
     option_tab = st.sidebar.radio('Navigation', tabs)
 
     st.sidebar.markdown('_Data sources: tut.by, naviny.online_')
 
     st.title('Topic modeling :mag: :newspaper: :heavy_check_mark:')
 
-    topic_id = get_topic_id(df_topics)
+    topic_id = get_topic_id(df_topics) if option_tab in tabs[:3] else None
 
     if option_tab == tabs[0]:
 
@@ -38,6 +40,10 @@ def main():
 
     elif option_tab == tabs[2]:
         write_plot_points(df_article_topic, topic_id)
+
+    elif option_tab == tabs[3]:
+        st.subheader('Topic tree:')
+        st.pyplot(figure_topics_structure)
 
 
 @st.cache(allow_output_mutation=True, persist=False, show_spinner=False)
@@ -60,7 +66,9 @@ def get_data():
         .merge(df_topics, on='topic_id') \
         .sort_values(by='time', ascending=False)
 
-    return df_topics, df_frequencies, df_article_topic
+    data_topics_structure = get_data_topics_structure(df_article_topic, df_topics)
+
+    return df_topics, df_frequencies, df_article_topic, data_topics_structure
 
 
 def get_topic_id(df_topics):
@@ -187,6 +195,29 @@ def similarity_search(df_article_topic, topic_id):
         record = record[1]
         s = fr"_\[{record['time']}\]_ **{record['header']}** [{', '.join(record['tags'])}] \[{', '.join(record['topic_words'])}\] (distance: {distance:.3f})"
         st.info(s)
+
+
+def get_data_topics_structure(df_acticles, df_topics):
+
+    f = lambda group: np.mean(group.to_list(), axis=0, dtype=float).tobytes()
+
+    embeddings = df_acticles.groupby('topic_id')['embedding_document'].agg(f).map(np.frombuffer)
+    topic_ids = embeddings.index.to_numpy()
+    embeddings = embeddings.to_list()
+    embeddings = np.array(embeddings)
+
+    topic_words = df_topics.set_index('topic_id')['topic_words'][topic_ids]
+    topic_words = topic_words.map(lambda words: ', '.join(words)).values
+
+    linkage = cluster_hierarchy.linkage(embeddings, method='complete', metric='cosine',
+                                        optimal_ordering=True)
+
+    figure, ax = plt.subplots(figsize=(3, 30))
+
+    dendrogram = cluster_hierarchy.dendrogram(linkage, labels=topic_words, orientation='left',
+                                              leaf_font_size=12, no_plot=False, ax=ax)
+
+    return figure
 
 
 if __name__ == '__main__':
